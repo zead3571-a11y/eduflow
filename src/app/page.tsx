@@ -1,0 +1,4 @@
+import Link from 'next/link';
+export default function HomePage() {
+  return <main className="landing-shell"><nav className="landing-nav"><span className="brand">EDUFLOW<span>.</span></span><div><Link href="/login">تسجيل الدخول</Link><Link className="primary-button link-button" href="/signup">ابدأ مجاناً</Link></div></nav><section className="hero"><p className="eyebrow">THE OPERATING SYSTEM FOR TUTORING CENTERS</p><h1>إدارة سنترك،<br/><span>بشكل أذكى.</span></h1><p className="hero-copy">منصة واحدة تجمع الطلاب والمدرسين والمجموعات والحضور والمدفوعات في مساحة عمل منظمة وآمنة.</p><div className="hero-actions"><Link className="primary-button link-button" href="/signup">ابدأ التجربة المجانية</Link><Link className="secondary-button link-button" href="/login">لديك حساب؟ سجل الدخول</Link></div><div className="hero-foot">مصممة للسناتر التعليمية في مصر · العربية والإنجليزية</div></section></main>;
+}

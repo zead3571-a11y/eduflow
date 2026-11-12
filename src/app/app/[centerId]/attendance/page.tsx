@@ -1,0 +1,16 @@
+import Link from 'next/link';
+import { notFound, redirect } from 'next/navigation';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+
+export default async function AttendancePage({ params }: { params: Promise<{ centerId: string }> }) {
+  const { centerId } = await params;
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser(); if (!user) redirect('/login');
+  const { data: center } = await supabase.from('centers').select('id,name,timezone').eq('id', centerId).maybeSingle(); if (!center) notFound();
+  const { data: sessions, error } = await supabase.from('sessions').select('id,group_id,starts_at,ends_at,status,room_label,groups(name)').eq('center_id', centerId).neq('status','canceled').order('starts_at',{ascending:false}).limit(100);
+  const sessionIds = (sessions ?? []).map(s => s.id);
+  const { data: records } = sessionIds.length ? await supabase.from('attendance').select('session_id,status').eq('center_id',centerId).in('session_id',sessionIds) : { data: [] as {session_id:string;status:string}[] };
+  const totals = new Map<string,{present:number;absent:number;late:number;excused:number}>();
+  for (const r of records ?? []) { const t=totals.get(r.session_id) ?? {present:0,absent:0,late:0,excused:0}; if (r.status in t) t[r.status as keyof typeof t]++; totals.set(r.session_id,t); }
+  return <main className="app-shell"><header className="app-header"><div><span className="brand">EDUFLOW<span>.</span></span><p className="muted">{center.name}</p></div><nav className="header-links"><Link href={`/app/${centerId}`}>لوحة السنتر</Link><Link href={`/app/${centerId}/groups`}>المجموعات</Link><Link href={`/app/${centerId}/students`}>الطلاب</Link><Link href={`/app/${centerId}/schedule`}>الجدول</Link></nav></header><section className="app-content"><p className="eyebrow">ATTENDANCE</p><h1>الحضور والغياب</h1><p className="muted">اختر الحصة لتسجيل الحضور أو مراجعة السجل. الأوقات حسب {center.timezone}.</p>{error && <p className="form-error">تعذر تحميل الحصص: {error.message}</p>}<section className="panel" style={{marginTop:24}}><div className="panel-heading"><h2>الحصص الأخيرة والقادمة</h2><Link className="secondary-button link-button" href={`/app/${centerId}/attendance/progress`}>تقرير تقدم الطلاب</Link></div><div className="table-wrap"><table><thead><tr><th>المجموعة</th><th>التاريخ</th><th>الوقت</th><th>حاضر</th><th>غائب</th><th>متأخر</th><th>الإجراء</th></tr></thead><tbody>{(sessions ?? []).map(s=>{const g=Array.isArray(s.groups)?s.groups[0]:s.groups;const t=totals.get(s.id)??{present:0,absent:0,late:0,excused:0};return <tr key={s.id}><td>{g?.name??'—'}</td><td>{new Date(s.starts_at).toLocaleDateString('ar-EG',{timeZone:center.timezone})}</td><td>{new Date(s.starts_at).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit',timeZone:center.timezone})}</td><td>{t.present}</td><td>{t.absent}</td><td>{t.late}</td><td><Link className="secondary-button link-button" href={`/app/${centerId}/attendance/${s.id}`}>تسجيل / مراجعة</Link></td></tr>})}</tbody></table>{!sessions?.length&&<p className="empty-state">لا توجد حصص حتى الآن. أنشئ حصصاً من صفحة المجموعات أولاً.</p>}</div></section></section></main>;
+}
