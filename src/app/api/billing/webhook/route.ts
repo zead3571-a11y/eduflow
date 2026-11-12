@@ -44,7 +44,11 @@ export async function POST(request: Request) {
     },
   });
   if (error || (data && data.ok === false)) {
-    console.error('Billing webhook processing failed', { provider: event.provider, eventId: event.event_id, message: error.message });
+    console.error('Billing webhook processing failed', {
+      provider: event.provider,
+      eventId: event.event_id,
+      message: error?.message ?? 'RPC reported unsuccessful processing',
+    });
     return NextResponse.json({ error: 'Event processing failed.' }, { status: 500 });
   }
   return NextResponse.json(data ?? { ok: true });
