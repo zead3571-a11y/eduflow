@@ -1,0 +1,6 @@
+{
+  "name": "EDUFLOW — نظام إدارة المراكز التعليمية",
+  "description": "نظام سحابي متكامل باللغة العربية لإدارة السناتر والمراكز التعليمية في مصر: الحضور، الطلاب، المجموعات، الجدول الأسبوعي، المدفوعات، التقييمات، وبوابة أولياء الأمور.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

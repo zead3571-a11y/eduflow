@@ -1,0 +1,183 @@
+
+برومت السياق (الصقه أولاً)
+CONTINUATION CONTEXT
+EDUFLOW already has phases 1 to 16 done: repositories with LocalStorage adapter, auth, strict permissions, CSV export, monthly invoices and discounts, teacher settlements, makeup sessions, thermal receipts, WhatsApp wa.me links with an outbox, QR cards and scanning, optional face attendance, and the Student Platform (code login, video lessons, online exams, self check-in).
+Keep every global rule: Arabic RTL UI, Cairo font and existing design tokens, all data through repositories, permissions enforced in code, activity-log entries for sensitive actions, loading/empty/error/success states, mobile 390px and desktop 1440px, phase by phase with an Arabic manual checklist at the end, wait for my confirmation before the next phase, and never break existing screens.
+Every new module is gated by a plan feature flag (editable plan config) and shows the locked-feature screen with an upgrade call to action when off.
+SECRETS RULE: browser code must never contain or store API keys, tokens or webhook secrets (payment gateway, WhatsApp, AI). Anything that needs a secret or a webhook sits behind a provider interface with a MOCK implementation now, and a documented server-function contract in docs/backend-handoff.md.
+مرحلة 17 — أساس التكاملات (مزوّدات تجريبية وWebhooks وجدولة)
+PHASE 17: INTEGRATION FOUNDATION
+- PaymentProvider interface: createCheckout(invoiceIds, amount, method, returnUrl) returns a hosted checkout reference/url; verifyWebhook(rawBody, signature); getTransaction(id); refund(txId, amount, reason). MockPaymobProvider simulates a hosted checkout page where I can choose success, failure, pending or cancel, then delivers an HMAC-signed webhook (mock secret) asynchronously with a random delay.
+- MessagingProvider interface: sendTemplate(to, templateName, language, variables), sendText(to, body) (only inside the 24-hour customer window), parseStatusWebhook(payload). MockWhatsAppCloudProvider simulates sent, delivered, read and failed statuses with error codes.
+- Webhook handler module: signature verification, idempotency by event id, replay protection, persistence in a webhookEvents repository, activity-log entry, safe failure handling.
+- Job scheduler abstraction: registerJob(name, interval or cron, handler) and runDueJobs(). In the prototype jobs run while the app is open plus a manual 'run now' button in Settings > النظام; document the server cron equivalent.
+- StorageProvider interface for files (assignment uploads, receipts, reports) with a prototype implementation that enforces size and type limits and clearly documents that real storage must be server-side.
+- Settings > التكاملات: status cards for payments, WhatsApp, push, AI, storage with enabled flag, mode (تجريبي / حقيقي), masked fields labeled 'stored server-side only' that never save secrets in the browser, and a test-connection button against the mock.
+- Add plan flags: parentPayments, whatsappAutomation, cashRegister, autoReminders, pwaPush, inventory, assignments, liveSessions, monthlyReports, registrationCrm, staffPayroll, installments, multiBranch, gamification, aiAssistant.
+Acceptance: mock checkout and mock WhatsApp events flow through the handlers; duplicate webhooks do nothing; no secret appears in any browser storage.
+مرحلة 18 — دفع أولياء الأمور أونلاين (Paymob)
+PHASE 18: ONLINE PARENT PAYMENTS
+Uses PaymentProvider from Phase 17. Flag: parentPayments.
+- Settings > الدفع الأونلاين: toggle each method independently: card, mobile wallet, Fawry reference (pay at a Fawry outlet), InstaPay. Availability depends on the merchant account, so each method has an enabled flag. If a method is not supported by the gateway account (for example InstaPay), offer a 'manual transfer' fallback: show the center's transfer details, let the parent upload a proof screenshot, and send it to a staff approval queue.
+- Parent portal: open invoices list, pay one or several invoices, full or partial amount (minimum amount setting), method picker, summary with any gateway fee. Optional setting 'pass gateway fee to parent' (OFF by default and always shown clearly before payment).
+- Flow: create a pending Payment attempt, redirect to hosted checkout (mock), and on return show a pending page. NEVER trust the return URL: only the verified webhook marks an invoice paid. Handle success, failure, pending (including Fawry reference with expiry and countdown), cancel, and duplicate webhooks. Idempotent so an invoice cannot be paid twice or over its remaining amount.
+- On success: create the Payment (method and gateway transaction id), update the invoice, generate the receipt automatically (A5 and thermal formats), show a download button in the portal, notify the parent, and queue a WhatsApp receipt message (Phase 19).
+- Staff screens: online payments list with status filters, transaction details, reconciliation view comparing gateway transactions to recorded payments with mismatches highlighted, and refund or void by accountant, admin or owner with a required reason and activity-log entry.
+- Receptionist cannot edit online payments. Parents see only their own children's invoices.
+Acceptance: success, failure, pending and duplicate-webhook scenarios all behave correctly on the mock; reconciliation finds a deliberately created mismatch.
+مرحلة 19 — واتساب تلقائي (Cloud API)
+PHASE 19: WHATSAPP CLOUD API AUTOMATION
+Uses MessagingProvider from Phase 17. Flag: whatsappAutomation. Keep the wa.me manual flow as a fallback when automation is off.
+- Settings > واتساب: provider status, phone number display, mode, sending limits, quiet hours (default no sends between 22:00 and 08:00), and an opt-in policy.
+- Template manager: Meta requires pre-approved templates for messages the business starts. Map each internal template (absence, payment receipt, payment reminder, exam result, session reminder, monthly report) to a template name, language and ordered variables, with an approval status (معتمد / قيد المراجعة / مرفوض) and a preview. A message type without an approved template cannot be sent automatically. Free-form text is allowed only inside the 24-hour window after the parent last wrote to the center.
+- Consent: track opt-in per parent (source, date, who recorded it) and honor opt-out keywords. Never send to a number without opt-in when automation is on.
+- Queue: outbox items go through a sending queue with rate limiting, retries with exponential backoff, and permanent-failure handling. Extend statuses: queued, sent, delivered, read, failed (with error code and Arabic explanation).
+- Status webhooks update the outbox through the Phase 17 handler. Show per-message status in the messages log and per-student last-contact info.
+- Triggers (each with a setting: automatic, needs approval, or off): absence after attendance is saved (with configurable delay), payment receipt, payment reminders (Phase 21), exam results, monthly report.
+- Cost tracking: count messages by category per month and let the center enter its own per-message rates to see an estimated monthly cost. Do not hard-code any prices.
+- Messages log screen with filters, retry, and export (CSV module).
+Acceptance: only approved templates are sent; opt-out blocks sending; statuses progress from queued to read on the mock; quiet hours defer sends.
+مرحلة 20 — قفل اليومية (الخزنة)
+PHASE 20: CASH REGISTER SHIFTS AND DAILY CLOSE
+Flag: cashRegister.
+- Open shift: cashier, opening float, start time. Only one open shift per cashier. Every cash payment, cash expense and cash settlement is attached to the open shift; non-cash methods (wallet, card, transfer, online) are totaled separately by method and never counted as cash in the drawer.
+- Expected cash = opening float + cash payments - cash expenses/settlements paid out. Show a live running summary during the shift.
+- Close shift: the cashier counts the drawer (optional denomination counter for 200, 100, 50, 20, 10, 5, 1 EGP and coins) and enters the actual cash. The system shows the variance (short or over). A configurable tolerance; beyond it a reason is required and a manager approval is needed.
+- Locking: once closed, the shift's payments and expenses become immutable. Corrections are made only by an adjustment entry with a reason, linked to the original (never by editing).
+- Reports: end-of-shift report (A4 and 80mm), daily totals across shifts, per-cashier variance history, per-method totals. CSV export.
+- Handover: closing a shift can start the next cashier's shift with the opening float carried over.
+- Alerts: shift open for more than 24 hours; repeated variances for the same cashier.
+- Permissions: receptionist and accountant open and close their own shift; owner and admin approve variances and may reopen a closed shift with a reason; teachers have no access.
+Acceptance: expected vs counted calculation is correct; non-cash is excluded; closed shifts cannot be edited; adjustments are traceable.
+مرحلة 21 — تذكيرات الدفع التلقائية بجدول
+PHASE 21: AUTOMATIC PAYMENT REMINDER SCHEDULE
+Flag: autoReminders. Uses the job scheduler and the WhatsApp/outbox layer.
+- Rules editor in Settings: an ordered list of steps relative to the invoice due date, for example -2 days, due day, +3, +7, +14. Each step has a channel (parent portal notification, WhatsApp, or both), a template, and an on/off switch. Provide a sensible default schedule and a reset button.
+- Stop conditions: invoice paid, installment plan covers it, student on hold, or an active promise-to-pay date. Maximum reminders per invoice. Respect quiet hours and parent opt-out.
+- Escalation: at the last step create a task for staff (a follow-up list on the dashboard) instead of another message.
+- Promise to pay: staff record a promised date and note; reminders pause until that date.
+- Daily job: idempotent (never sends the same step twice for an invoice), logs every decision (sent, skipped and why), and handles invoices created or changed after the schedule started.
+- Screens: upcoming reminders calendar, per-student reminder history, pause or resume per student, and a dry-run preview showing what would be sent today.
+Acceptance: running the job twice sends nothing twice; a paid invoice stops reminders; the dry run matches what is actually sent.
+مرحلة 22 — تطبيق PWA وإشعارات
+PHASE 22: INSTALLABLE PWA AND PUSH NOTIFICATIONS
+Flag: pwaPush. Targets the student portal and the parent portal first, staff app optional.
+- Web app manifest (Arabic name, RTL, theme colors, maskable icons), service worker with an app-shell cache and a safe update flow ('يوجد تحديث' prompt), and an offline page. Never cache authenticated API data unsafely.
+- Install experience: a custom install banner on supported browsers, and a short illustrated Arabic guide for iPhone ('Add to Home Screen') since iOS has no install prompt.
+- Push: subscription flow with a clear permission explanation, per-user notification preferences (lesson published, exam opening, exam result, invoice due, payment received, attendance), and a server-side-only VAPID contract documented in the handoff file. In the prototype, simulate push with the notification API and an in-app notification center as the fallback. Note in the UI and docs that on iPhone push works only for installed PWAs on recent iOS versions.
+- Offline-first attendance (staff): queue attendance records locally while offline with a visible 'N سجلات بانتظار المزامنة' badge, sync automatically when back online, and resolve conflicts (in-person methods win).
+Acceptance: installable on Android Chrome; offline page works; queued attendance syncs without duplicates.
+مرحلة 23 — مبيعات المذكرات والكتب والمخزون
+PHASE 23: NOTES AND BOOKS SALES AND INVENTORY
+Flag: inventory.
+- Products: name, type (مذكرة / كتاب / أدوات / أخرى), optional teacher and group link, cost price, sale price, stock quantity, reorder level, barcode or QR, active flag.
+- Stock: purchases/stock-in with supplier and cost, adjustments with a required reason (damage, count correction), a movement ledger per product, low-stock alerts on the dashboard.
+- Quick-sale screen (POS style, mobile friendly): search or scan a product, quantity, optionally attach a student by scanning the student card QR or searching, payment method. Option 'add to the student's account' creates an invoice line instead of taking cash. Print the receipt in A5 or 80mm.
+- Integration: cash sales attach to the open cash shift (Phase 20); sales appear in finance reports as a separate revenue category; returns with a required reason restore stock and reverse the sale.
+- Optional teacher share on sales of that teacher's notes, feeding the teacher settlement (Phase 5) as a separate line.
+- Reports: sales by product and by teacher, margin, stock valuation, slow movers. CSV export.
+- Permissions: receptionist can sell; accountant, admin and owner manage products, stock and returns; teachers see only their own products' sales if enabled.
+Acceptance: stock never goes negative without a warning; a sale updates stock, the shift and reports consistently; a return reverses all three.
+مرحلة 24 — الواجبات
+PHASE 24: ASSIGNMENTS
+Flag: assignments.
+- Teacher creates an assignment: title, instructions, attachments (via StorageProvider with type and size limits), group(s), due date-time, late policy (not accepted, accepted with penalty percent, accepted flagged), and max score.
+- Student submits text, links or files before or after the due date per policy, can resubmit until the deadline or until graded (versions kept), sees status (لم يُسلّم / تم التسليم / متأخر / تم التصحيح).
+- Teacher grading screen: submissions list with filters, open a submission, score, written feedback, optional reusable comment snippets, and return to student. Bulk reminders to students who have not submitted (through the notification and WhatsApp layers).
+- Syncs the score to Assessments (type واجب) and shows it in the parent portal. Analytics: submission rate, average score, late submissions.
+- Permissions: only the group's teacher, admin and owner manage; a student sees only their own submissions.
+Acceptance: late policy applied correctly; resubmission keeps history; scores reach assessments and the parent portal.
+مرحلة 25 — الحصص اللايف (Zoom / Meet)
+PHASE 25: LIVE SESSIONS
+Flag: liveSessions.
+- On a session or group schedule, the teacher adds a meeting link (Zoom, Google Meet, or other), optional passcode, and visibility window. The student portal shows a 'Join' button only inside the window (for example 10 minutes before until the end), and lists upcoming live sessions.
+- Be honest in the UI and logic: clicking Join does NOT prove the student stayed. Log a join event (time) and mark the attendance method as 'live-join' with a pending-confirmation status.
+- Attendance confirmation: after the session the teacher can import the meeting provider's participant report (CSV upload), and the system matches rows to students by student code or name with a manual matching screen for unmatched rows, then converts pending joins to confirmed present, with a minimum-minutes threshold setting. Unconfirmed joins stay flagged for staff review.
+- In-person attendance and QR/face methods still take precedence over live methods.
+- A future direct API integration with the meeting provider is documented in the handoff file; do not build it now.
+Acceptance: the Join button respects the window; CSV matching handles unmatched names; precedence rules hold.
+مرحلة 26 — التقرير الشهري للطالب (PDF)
+PHASE 26: MONTHLY STUDENT REPORT
+Flag: monthlyReports.
+- Report content per student per month: attendance summary (present, late, absent, makeup), exam and assessment scores with a small trend chart, assignment completion, lesson engagement if the student platform is on, a teacher comment (editable text with reusable snippets), and optionally the payment status (toggle in settings, off by default).
+- Batch generate for a group or whole center and a chosen month, with a progress state and a per-student preview. A teacher approval step before release (draft, approved, sent). Center branding (logo, colors, signature line).
+- Output PDF (A4) using the existing PDF module with correct Arabic shaping and RTL; download single or ZIP batch.
+- Delivery: publish to the parent portal, and queue a WhatsApp message with the document link/template through the WhatsApp layer. Track delivery and open status where available.
+- Permissions: teachers handle their own groups; admin and owner handle all.
+Acceptance: Arabic renders correctly in the PDF; charts and numbers match the source data; only approved reports are released.
+مرحلة 27 — التسجيل الأونلاين وقائمة الانتظار ومتابعة الاستفسارات (CRM)
+PHASE 27: ONLINE REGISTRATION, WAITLIST AND LEADS CRM
+Flag: registrationCrm.
+- Public registration form per center (link plus printable QR poster): student name, stage, parent name and phone (validated Egyptian numbers), preferred groups, notes, and a consent checkbox for contact. Anti-spam: honeypot field, rate limit per device, placeholder for a captcha provider. No login required. Clear Arabic success page.
+- Leads pipeline (kanban and list): جديد → تم التواصل → حصة تجريبية → مسجّل / مفقود (with a lost reason). Assign to a staff member, source tracking (QR, link, referral, phone, social), notes timeline, and follow-up reminders with due dates shown on the dashboard.
+- Quick-add for phone inquiries (name, phone, interest) from anywhere in the app.
+- Convert a lead into a student in one step: prefill the student form, assign to a group, optionally generate the first invoice.
+- Waitlist per group: when a group is full, registrations go to its waitlist with a position. When a seat opens, notify the next parent through the WhatsApp layer with a time-limited offer, then move to the next if no reply.
+- Duplicate detection by parent phone. Funnel report: leads by source, conversion rate, time to convert, lost reasons. CSV export.
+- Permissions: receptionist and admin manage; owner sees reports; teachers none.
+Acceptance: the public form saves leads; conversion creates a student without retyping; the waitlist advances correctly.
+مرحلة 28 — حضور الموظفين والمرتبات
+PHASE 28: STAFF ATTENDANCE AND PAYROLL
+Flag: staffPayroll. Teachers are excluded because they already have settlements.
+- Staff profiles for non-teacher employees (receptionist, accountant, cleaner, security): role, phone, base salary or hourly rate, working schedule, hire date, status.
+- Check-in and check-out: from a kiosk screen with PIN or QR badge, with timestamps, lateness and early-leave calculation against the schedule and a configurable grace period. Manual correction by admin with a reason and activity-log entry.
+- Leave requests: types (annual, sick, unpaid), approval flow, balances.
+- Monthly payroll: base, lateness and absence deductions per configurable rules, overtime, bonuses, advances and their repayment, net pay. Review screen, approval, then payslip PDF and an expense entry linked to the cash register or bank. Locked after approval, with adjustments only as new lines.
+- Reports: attendance by employee, lateness trends, payroll totals. CSV export.
+- Permissions: owner and admin run payroll; accountant prepares; employees see only their own payslips if enabled.
+Acceptance: deductions and net pay match a manual calculation; approved payroll cannot be edited.
+مرحلة 29 — تقسيط المصروفات وخطط الدفع
+PHASE 29: INSTALLMENTS AND PAYMENT PLANS
+Flag: installments.
+- Plan templates (for example 3 or 4 installments, custom percentages and dates). Assign a plan to a student or to a specific invoice; the system creates the installment schedule with due dates and amounts that always sum exactly to the invoice net amount (handle rounding on the last installment).
+- Each installment has its own status (مستحق / مدفوع / متأخر), and payments are allocated to the oldest unpaid installment first. Support early settlement of the remainder.
+- Editing a plan after payments exist is allowed only for unpaid installments, with a reason and before/after log. Optional late fee setting (OFF by default) applied transparently as a separate line.
+- Integrates with reminders (Phase 21: reminders follow installment due dates), online payments (Phase 18: pay a single installment), parent portal (schedule view with progress), and reports (expected collections by month).
+Acceptance: installments always sum to the invoice; allocation order is correct; reminders and online payments use installment amounts.
+مرحلة 30 — تعدد الفروع
+PHASE 30: MULTI-BRANCH
+Flag: multiBranch (top plan).
+- Branch entity (name, address, phone, manager, active). Every operational record gets a branchId (groups, rooms, staff, students' enrollment, sessions, invoices, payments, expenses, shifts, inventory). Add a data migration that assigns all existing data to a default branch.
+- Users are assigned to one or more branches; all lists, counters, dashboards, exports and reports are scoped to the user's branches. New role 'branch manager' limited to their branch. Owner and admin switch branches from a selector in the top bar, with an 'all branches' consolidated view.
+- Owner dashboard: branch comparison (students, collections, expenses, attendance rate, overdue), best and worst performers, and consolidated reports with per-branch columns.
+- Transfer a student between branches with history. Teachers can work in several branches with separate groups and settlements per branch.
+- Cash registers, receipts numbering and inventory are per branch.
+Acceptance: a branch user can never read or write another branch's data; consolidated numbers equal the sum of the branches.
+مرحلة 31 — النقاط والشارات للطلاب
+PHASE 31: POINTS AND BADGES
+Flag: gamification. Off by default per center.
+- Rules editor: points for attendance, an attendance streak, perfect month, on-time assignment, exam score thresholds, and manual teacher awards with a reason. Badge definitions with Arabic names, simple icons (no emoji) and criteria. Levels based on cumulative points.
+- Student portal: points, current level progress, badges earned, and recent activity. Parent portal: read-only view.
+- Leaderboards are opt-in per group and privacy-minded: show only the top entries by first name or initials, never show the bottom of the ranking, and let teachers disable them. Prefer personal-progress and streak views over ranking.
+- Rewards catalog defined by the center (for example a discount or a free note) with redemption requests approved by staff and tracked.
+- Anti-gaming: points computed from verified events only, no double-awarding for the same event, and a staff reversal action with a reason and log entry.
+Acceptance: awarding is idempotent per event; reversals recalculate levels; leaderboards respect the opt-in and privacy settings.
+مرحلة 32 — مميزات الذكاء الاصطناعي
+PHASE 32: AI ASSISTANT FEATURES
+Flag: aiAssistant (top plan). Master switch plus per-feature switches in Settings > الذكاء الاصطناعي, OFF by default.
+Architecture: an AIProvider interface (generate(prompt, options)). Never put an API key in the browser; the real provider must be a server function (document the contract). Prototype uses a MockAIProvider returning realistic sample output. Per-center monthly quota, usage log (feature, tokens or calls, date), and a clear message when the quota ends. Privacy: send the minimum data, pseudonymize student names before sending, and let the owner opt in explicitly with an Arabic explanation of what is sent.
+
+A) Exam question generation
+- The teacher pastes lesson text (or picks a lesson's attached text), chooses question types, count and difficulty, and gets DRAFT questions with correct answers and explanations. Drafts land in a review queue where the teacher edits, approves or rejects each question. Nothing is ever published to students automatically, and approved questions are marked with their origin.
+
+B) Early warning for dropout risk
+- Start with an explainable rules-based score: consecutive or frequent absences, falling scores trend, overdue payments, missed assignments, low platform engagement. Each at-risk student shows a risk level (منخفض / متوسط / مرتفع) and the exact reasons. Weights are editable. Weekly list on the dashboard with suggested follow-up actions and a way to log the action taken and dismiss. Do not label students publicly and never show risk to the student; parents see nothing automatically.
+
+C) Parent message drafting
+- From student data the staff member picks a purpose (absence follow-up, praise, concern about scores, payment reminder) and a tone (formal or friendly Egyptian Arabic) and receives an editable draft. It is a suggestion only: the staff member edits and sends it through the normal messaging flow. Never auto-send.
+Acceptance: with the flag off nothing AI-related is visible; drafts never reach students without teacher approval; usage is logged and capped; no secret is in the browser.
+مرحلة 33 — تشطيب صفحة الهبوط وشاشة الدخول
+PHASE 33: LANDING PAGE AND LOGIN POLISH
+- Landing page statistics: remove or replace unmeasured marketing claims ('24/7', '100%', '3 seconds') with factual, verifiable statements (for example 'Arabic RTL interface' and 'works on mobile'). No numeric claims that are not measured.
+- Live preview card: fill it with realistic demo data (sessions today, active students, sample recent items) instead of zeros, and label it clearly as sample data.
+- Content: update the features and the pricing/plans sections to the real plan config and feature flags; mention Excel/CSV, WhatsApp, student platform and the new modules only where they actually work, and keep 'قريباً' only for features that are not working yet.
+- Login screen: hide the demo accounts and the shared demo password unless a demo-mode flag is on; never print a password on a production screen.
+- Add Privacy Policy and Terms pages (Arabic, editable text in Settings) and link them from the footer and registration forms. Add an automatic daily backup reminder and a visible 'last backup' status in Settings.
+Acceptance: no unmeasured claim remains; demo credentials appear only in demo mode; pricing page matches the plan config.
+مرحلة 34 — مراجعة نهائية وأمان
+PHASE 34: FINAL QA AND SECURITY REVIEW
+- Run all unit tests, build and lint. Add tests for: webhook signature, idempotency and replay protection; payment allocation and installments rounding; reminder schedule idempotency and stop conditions; cash shift expected-vs-counted and locking; inventory movements and returns; branch data scoping; points awarding idempotency; AI privacy and quota; plan-flag gating for every module.
+- Browser verification at 390px and 1440px on every new screen: RTL, Arabic text, no horizontal overflow, no console errors.
+- Security checklist with pass/fail: no secrets or tokens in any browser storage or bundle; money-changing actions are permission-checked in code and logged; online payments are only confirmed by verified webhooks; messages respect opt-in and quiet hours; AI output never reaches students unreviewed.
+- Update docs/backend-handoff.md with: tables and row-level security, the server functions to build (checkout creation, payment webhook, WhatsApp send and webhook, scheduled jobs, push, AI proxy, file storage), environment variables to configure, and everything that must move to a real backend before using real money, real messages or real students.
+- Output a short Arabic change log grouped by feature.

@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --eduflow-navy: #0F2A4A;
+    --eduflow-teal: #0F766E;
+    --eduflow-bg: #F4F7FA;
+    --eduflow-surface: #FFFFFF;
+    --eduflow-border: #E2E8F0;
+    --eduflow-text: #1E293B;
+    --eduflow-muted: #5B6B80;
+  }
+
+  html {
+    font-family: 'Cairo', 'Tajawal', system-ui, -apple-system, sans-serif;
+    direction: rtl;
+    background-color: #F4F7FA;
+    color: #1E293B;
+  }
+
+  body {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.55;
+    font-feature-settings: "tnum" 1;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt,
+  #printable-receipt *,
+  #printable-student-card,
+  #printable-student-card *,
+  #printable-pdf-document,
+  #printable-pdf-document *,
+  #printable-login-slips,
+  #printable-login-slips * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    position: fixed;
+    inset: 0;
+    width: 148mm;
+    min-height: 210mm;
+    margin: 0 auto;
+    background: #FFFFFF;
+    padding: 16mm;
+    border: none;
+    box-shadow: none;
+  }
+  #printable-receipt.thermal-80mm {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 80mm;
+    max-width: 80mm;
+    min-height: auto;
+    margin: 0 auto;
+    padding: 5mm;
+    font-size: 11px;
+    border: none;
+    box-shadow: none;
+  }
+  #printable-student-card {
+    position: fixed;
+    top: 10mm;
+    left: 0;
+    right: 0;
+    width: 90mm;
+    margin: 0 auto;
+    background: #FFFFFF;
+    padding: 6mm;
+    border: 1px solid #E2E8F0;
+    box-shadow: none;
+  }
+  #printable-pdf-document {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 210mm;
+    margin: 0 auto;
+    background: #FFFFFF;
+    padding: 12mm 14mm;
+    border: none;
+    box-shadow: none;
+  }
+  #printable-login-slips {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 210mm;
+    margin: 0 auto;
+    background: #FFFFFF;
+    padding: 8mm;
+    border: none;
+    box-shadow: none;
+  }
+  #printable-login-slips .login-slip-page {
+    page-break-after: always;
+  }
+  #printable-login-slips .login-slip-page:last-child {
+    page-break-after: auto;
+  }
+}
